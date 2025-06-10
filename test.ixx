@@ -1,6 +1,7 @@
 //
 // Created by yuri on 25-6-9.
 //
+module;
 
 export module test;
 #include <iostream>

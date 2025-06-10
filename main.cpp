@@ -1,7 +1,10 @@
-// #include <iostream>
-import test;
+import window;
 
-int main() {
-    Test::Test();
+int main(int argc, char** argv) {
+    Window window{};
+    if (window.Init() == -1) {
+        return -1;
+    }
+    window.Run();
     return 0;
 }
