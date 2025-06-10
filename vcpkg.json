@@ -1,0 +1,10 @@
+{
+  "name": "em3dlab",
+  "version-string": "0.1",
+  "dependencies": [
+    {
+      "name": "sdl3",
+      "features": ["vulkan"]
+    }
+  ]
+}
