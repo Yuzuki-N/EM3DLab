@@ -1,10 +1,10 @@
-import window;
+import VkEngine;
 
 int main(int argc, char** argv) {
-    Window window{};
-    if (window.Init() == -1) {
-        return -1;
-    }
-    window.Run();
+    VkEngine engine;
+
+    engine.Init();
+    engine.Run();
+
     return 0;
 }

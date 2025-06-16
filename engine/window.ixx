@@ -10,7 +10,7 @@ public:
             return -1;
         }
 
-        mWindow = SDL_CreateWindow("EM3DLab", 640, 480, SDL_WINDOW_VULKAN);
+        mWindow = SDL_CreateWindow("EM3DLab", width, height, SDL_WINDOW_VULKAN);
 
         if (mWindow == nullptr) {
             auto erros = SDL_GetError();
@@ -35,11 +35,17 @@ public:
         }
 
     }
-    ~Window() {
+
+    void Cleanup() {
         SDL_DestroyWindow(mWindow);
         SDL_Quit();
     }
 
+    ~Window() {
+        Cleanup();
+    }
+
     SDL_Window* mWindow;
-    // private:
+    int width = 1280;
+    int height = 720;
 };
