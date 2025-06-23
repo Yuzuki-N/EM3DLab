@@ -20,19 +20,7 @@ public:
         return 0;
     }
     void Run() {
-        SDL_Event e;
-        bool bQuit = false;
 
-        while (!bQuit)
-        {
-            while (SDL_PollEvent(&e) != 0)
-            {
-                //close the window when user alt-f4s or clicks the X button
-                if (e.type == SDL_EVENT_QUIT) bQuit = true;
-            }
-
-            // draw();
-        }
 
     }
 
