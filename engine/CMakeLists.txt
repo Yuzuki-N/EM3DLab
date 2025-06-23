@@ -14,6 +14,7 @@ target_sources(engine
         FILE_SET CXX_MODULES FILES
         window.ixx
         vk_engine.ixx
+        vk_initializers.ixx
 )
 
 target_link_libraries(engine PUBLIC Vulkan::Vulkan SDL3::SDL3)

@@ -8,6 +8,7 @@ module;
 #include <SDL3/SDL_vulkan.h>
 export module VkEngine;
 import window;
+import vk_initializers;
 
 
 export class VkEngine {
@@ -19,6 +20,7 @@ public:
         mWindow.Init();
         InitVulkan();
         InitSwapchain();
+        InitCommands();
 
 
         bIsEngineInit = true;
@@ -29,6 +31,7 @@ public:
     void Cleanup() {
 
         if (bIsEngineInit) {
+            vkDestroyCommandPool(mDevice, mCommandPool, nullptr);
             vkDestroySwapchainKHR(mDevice, mSwapchain, nullptr);
 
             //destroy swapchain resources
@@ -86,6 +89,10 @@ public:
         // Get the VkDevice handle used in the rest of a Vulkan application
         mDevice = vkbDevice.device;
         mChosenGPU = physicalDevice.physical_device;
+
+        // use vkbootstrap to get a Graphics queue
+        mGraphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
+        mGraphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
     }
 
     void InitSwapchain() {
@@ -107,6 +114,19 @@ public:
         mSwapchainImageFormat = vkbSwapchain.image_format;
     }
 
+    void InitCommands() {
+        //create a command pool for commands submitted to the graphics queue.
+        //we also want the pool to allow for resetting of individual command buffers
+        VkCommandPoolCreateInfo commandPoolInfo = vkinit::command_pool_create_info(mGraphicsQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+
+        (vkCreateCommandPool(mDevice, &commandPoolInfo, nullptr, &mCommandPool));
+
+        //allocate the default command buffer that we will use for rendering
+        VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::command_buffer_allocate_info(mCommandPool, 1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+
+        (vkAllocateCommandBuffers(mDevice, &cmdAllocInfo, &mMainCommandBuffer));
+    }
+
     Window mWindow;
     bool bIsEngineInit = false;
 
@@ -120,4 +140,10 @@ public:
     VkFormat mSwapchainImageFormat;
     std::vector<VkImage> mSwapchainImages;
     std::vector<VkImageView> mSwapchainImageViews;
+
+    VkQueue mGraphicsQueue; //queue we will submit to
+    uint32_t mGraphicsQueueFamily; //family of that queue
+
+    VkCommandPool mCommandPool; //the command pool for our commands
+    VkCommandBuffer mMainCommandBuffer; //the buffer we will record into
 };
