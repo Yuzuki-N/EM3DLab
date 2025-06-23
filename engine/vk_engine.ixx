@@ -13,6 +13,29 @@ import vk_initializers;
 
 export class VkEngine {
 public:
+
+    Window mWindow;
+    bool bIsEngineInit = false;
+
+    VkInstance mInstance; // Vulkan library handle
+    VkDebugUtilsMessengerEXT mDebugMessenger; // Vulkan debug output handle
+    VkPhysicalDevice mChosenGPU; // GPU chosen as the default device
+    VkDevice mDevice; // Vulkan device for commands
+    VkSurfaceKHR mSurface; // Vulkan window surface
+
+    VkSwapchainKHR mSwapchain;
+    VkFormat mSwapchainImageFormat;
+    std::vector<VkImage> mSwapchainImages;
+    std::vector<VkImageView> mSwapchainImageViews;
+
+    VkQueue mGraphicsQueue; //queue we will submit to
+    uint32_t mGraphicsQueueFamily; //family of that queue
+
+    VkCommandPool mCommandPool; //the command pool for our commands
+    VkCommandBuffer mMainCommandBuffer; //the buffer we will record into
+    VkRenderPass mRenderPass;
+    std::vector<VkFramebuffer> mFramebuffers;
+
     void Init() {
         if (bIsEngineInit)
             return;
@@ -21,7 +44,8 @@ public:
         InitVulkan();
         InitSwapchain();
         InitCommands();
-
+        InitDefaultRenderpass();
+        InitFramebuffers();
 
         bIsEngineInit = true;
     }
@@ -33,10 +57,11 @@ public:
         if (bIsEngineInit) {
             vkDestroyCommandPool(mDevice, mCommandPool, nullptr);
             vkDestroySwapchainKHR(mDevice, mSwapchain, nullptr);
+            vkDestroyRenderPass(mDevice, mRenderPass, nullptr);
 
             //destroy swapchain resources
             for (int i = 0; i < mSwapchainImageViews.size(); i++) {
-
+                vkDestroyFramebuffer(mDevice, mFramebuffers[i], nullptr);
                 vkDestroyImageView(mDevice, mSwapchainImageViews[i], nullptr);
             }
 
@@ -117,33 +142,84 @@ public:
     void InitCommands() {
         //create a command pool for commands submitted to the graphics queue.
         //we also want the pool to allow for resetting of individual command buffers
-        VkCommandPoolCreateInfo commandPoolInfo = vkinit::command_pool_create_info(mGraphicsQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+        VkCommandPoolCreateInfo commandPoolInfo = vkinit::CommandPoolCreateInfo(mGraphicsQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
 
         (vkCreateCommandPool(mDevice, &commandPoolInfo, nullptr, &mCommandPool));
 
         //allocate the default command buffer that we will use for rendering
-        VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::command_buffer_allocate_info(mCommandPool, 1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+        VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::CommandBufferAllocateInfo(mCommandPool, 1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
 
         (vkAllocateCommandBuffers(mDevice, &cmdAllocInfo, &mMainCommandBuffer));
     }
 
-    Window mWindow;
-    bool bIsEngineInit = false;
+    void InitDefaultRenderpass() {
+        // the renderpass will use this color attachment.
+        VkAttachmentDescription colorAttachment = {};
+        //the attachment will have the format needed by the swapchain
+        colorAttachment.format = mSwapchainImageFormat;
+        //1 sample, we won't be doing MSAA
+        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        // we Clear when this attachment is loaded
+        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        // we keep the attachment stored when the renderpass ends
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        //we don't care about stencil
+        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 
-    VkInstance mInstance; // Vulkan library handle
-    VkDebugUtilsMessengerEXT mDebugMessenger; // Vulkan debug output handle
-    VkPhysicalDevice mChosenGPU; // GPU chosen as the default device
-    VkDevice mDevice; // Vulkan device for commands
-    VkSurfaceKHR mSurface; // Vulkan window surface
+        //we don't know or care about the starting layout of the attachment
+        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-    VkSwapchainKHR mSwapchain;
-    VkFormat mSwapchainImageFormat;
-    std::vector<VkImage> mSwapchainImages;
-    std::vector<VkImageView> mSwapchainImageViews;
+        //after the renderpass ends, the image has to be on a layout ready for display
+        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-    VkQueue mGraphicsQueue; //queue we will submit to
-    uint32_t mGraphicsQueueFamily; //family of that queue
+        VkAttachmentReference colorAttachmentRef = {};
+        //attachment number will index into the pAttachments array in the parent renderpass itself
+        colorAttachmentRef.attachment = 0;
+        colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    VkCommandPool mCommandPool; //the command pool for our commands
-    VkCommandBuffer mMainCommandBuffer; //the buffer we will record into
+        //we are going to create 1 subpass, which is the minimum you can do
+        VkSubpassDescription subpass = {};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.colorAttachmentCount = 1;
+        subpass.pColorAttachments = &colorAttachmentRef;
+
+        VkRenderPassCreateInfo renderPassInfo = {};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+
+        //connect the color attachment to the info
+        renderPassInfo.attachmentCount = 1;
+        renderPassInfo.pAttachments = &colorAttachment;
+        //connect the subpass to the info
+        renderPassInfo.subpassCount = 1;
+        renderPassInfo.pSubpasses = &subpass;
+
+
+        (vkCreateRenderPass(mDevice, &renderPassInfo, nullptr, &mRenderPass));
+    }
+
+    void InitFramebuffers() {
+        //create the framebuffers for the swapchain images. This will connect the render-pass to the images for rendering
+        VkFramebufferCreateInfo fbInfo = {};
+        fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fbInfo.pNext = nullptr;
+
+        fbInfo.renderPass = mRenderPass;
+        fbInfo.attachmentCount = 1;
+        fbInfo.width = mWindow.width;
+        fbInfo.height = mWindow.height;
+        fbInfo.layers = 1;
+
+        //grab how many images we have in the swapchain
+        const uint32_t swapchainImagecount = mSwapchainImages.size();
+        mFramebuffers = std::vector<VkFramebuffer>(swapchainImagecount);
+
+        //create framebuffers for each of the swapchain image views
+        for (int i = 0; i < swapchainImagecount; i++) {
+
+            fbInfo.pAttachments = &mSwapchainImageViews[i];
+            (vkCreateFramebuffer(mDevice, &fbInfo, nullptr, &mFramebuffers[i]));
+        }
+    }
+
 };
