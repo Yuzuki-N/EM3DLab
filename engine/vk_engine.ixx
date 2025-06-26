@@ -8,9 +8,87 @@ module;
 #include <VkBootstrap.h>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
+
+#define VK_CHECK(x)                                                 \
+do                                                              \
+{                                                               \
+VkResult err = x;                                           \
+if (err)                                                    \
+{                                                           \
+std::cout <<"Detected Vulkan error: " << err << std::endl; \
+abort();                                                \
+}                                                           \
+} while (0)
+
 export module VkEngine;
 import window;
 import vk_initializers;
+
+export class PipelineBuilder {
+public:
+
+    std::vector<VkPipelineShaderStageCreateInfo> _shaderStages;
+    VkPipelineVertexInputStateCreateInfo _vertexInputInfo;
+    VkPipelineInputAssemblyStateCreateInfo _inputAssembly;
+    VkViewport _viewport;
+    VkRect2D _scissor;
+    VkPipelineRasterizationStateCreateInfo _rasterizer;
+    VkPipelineColorBlendAttachmentState _colorBlendAttachment;
+    VkPipelineMultisampleStateCreateInfo _multisampling;
+    VkPipelineLayout _pipelineLayout;
+
+    VkPipeline build_pipeline(VkDevice device, VkRenderPass pass) {
+        //make viewport state from our stored viewport and scissor.
+        //at the moment we won't support multiple viewports or scissors
+        VkPipelineViewportStateCreateInfo viewportState = {};
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewportState.pNext = nullptr;
+
+        viewportState.viewportCount = 1;
+        viewportState.pViewports = &_viewport;
+        viewportState.scissorCount = 1;
+        viewportState.pScissors = &_scissor;
+
+        //setup dummy color blending. We aren't using transparent objects yet
+        //the blending is just "no blend", but we do write to the color attachment
+        VkPipelineColorBlendStateCreateInfo colorBlending = {};
+        colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        colorBlending.pNext = nullptr;
+
+        colorBlending.logicOpEnable = VK_FALSE;
+        colorBlending.logicOp = VK_LOGIC_OP_COPY;
+        colorBlending.attachmentCount = 1;
+        colorBlending.pAttachments = &_colorBlendAttachment;
+
+        //build the actual pipeline
+        //we now use all of the info structs we have been writing into into this one to create the pipeline
+        VkGraphicsPipelineCreateInfo pipelineInfo = {};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.pNext = nullptr;
+
+        pipelineInfo.stageCount = _shaderStages.size();
+        pipelineInfo.pStages = _shaderStages.data();
+        pipelineInfo.pVertexInputState = &_vertexInputInfo;
+        pipelineInfo.pInputAssemblyState = &_inputAssembly;
+        pipelineInfo.pViewportState = &viewportState;
+        pipelineInfo.pRasterizationState = &_rasterizer;
+        pipelineInfo.pMultisampleState = &_multisampling;
+        pipelineInfo.pColorBlendState = &colorBlending;
+        pipelineInfo.layout = _pipelineLayout;
+        pipelineInfo.renderPass = pass;
+        pipelineInfo.subpass = 0;
+        pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
+
+        //it's easy to error out on create graphics pipeline, so we handle it a bit better than the common VK_CHECK case
+        VkPipeline newPipeline;
+        if (vkCreateGraphicsPipelines(
+            device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &newPipeline) != VK_SUCCESS) {
+            std::cout << "failed to create pipeline\n";
+            return VK_NULL_HANDLE; // failed to create graphics pipeline
+            }
+        return newPipeline;
+    }
+};
 
 
 export class VkEngine {
@@ -42,6 +120,10 @@ public:
     VkFence mRenderFence;
     VkExtent2D mWindowExtent;
     uint32_t mFrameNumber;
+
+    VkPipelineLayout _trianglePipelineLayout;
+    VkPipeline _trianglePipeline;
+
 
     void Init() {
         if (bIsEngineInit)
@@ -311,8 +393,49 @@ public:
             std::cout << "Triangle vertex shader successfully loaded" << std::endl;
         }
 
+        VkPipelineLayoutCreateInfo pipeline_layout_info = vkinit::pipeline_layout_create_info();
+
+        VK_CHECK(vkCreatePipelineLayout(mDevice, &pipeline_layout_info, nullptr, &_trianglePipelineLayout));
 
 
+        PipelineBuilder pipelineBuilder;
+        pipelineBuilder._shaderStages.push_back(
+            vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, triangleVertexShader));
+        pipelineBuilder._shaderStages.push_back(
+            vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, triangleFragShader));
+
+        //vertex input controls how to read vertices from vertex buffers. We aren't using it yet
+        pipelineBuilder._vertexInputInfo = vkinit::vertex_input_state_create_info();
+
+        //input assembly is the configuration for drawing triangle lists, strips, or individual points.
+        //we are just going to draw triangle list
+        pipelineBuilder._inputAssembly = vkinit::input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+
+        //build viewport and scissor from the swapchain extents
+        pipelineBuilder._viewport.x = 0.0f;
+        pipelineBuilder._viewport.y = 0.0f;
+        pipelineBuilder._viewport.width = (float)mWindowExtent.width;
+        pipelineBuilder._viewport.height = (float)mWindowExtent.height;
+        pipelineBuilder._viewport.minDepth = 0.0f;
+        pipelineBuilder._viewport.maxDepth = 1.0f;
+
+        pipelineBuilder._scissor.offset = { 0, 0 };
+        pipelineBuilder._scissor.extent = mWindowExtent;
+
+        //configure the rasterizer to draw filled triangles
+        pipelineBuilder._rasterizer = vkinit::rasterization_state_create_info(VK_POLYGON_MODE_FILL);
+
+        //we don't use multisampling, so just run the default one
+        pipelineBuilder._multisampling = vkinit::multisampling_state_create_info();
+
+        //a single blend attachment with no blending and writing to RGBA
+        pipelineBuilder._colorBlendAttachment = vkinit::color_blend_attachment_state();
+
+        //use the triangle layout we created
+        pipelineBuilder._pipelineLayout = _trianglePipelineLayout;
+
+        //finally build the pipeline
+        _trianglePipeline = pipelineBuilder.build_pipeline(mDevice, mRenderPass);
     }
 
     void Draw() {
@@ -379,8 +502,15 @@ public:
         rpInfo.pClearValues = &clearValue;
 
         vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        //once we start adding rendering commands, they will go here
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _trianglePipeline);
+        vkCmdDraw(cmd, 3, 1, 0, 0);
+
         //finalize the render pass
         vkCmdEndRenderPass(cmd);
+
         //finalize the command buffer (we can no longer add commands, but it can now be executed)
         (vkEndCommandBuffer(cmd));
 
@@ -434,3 +564,4 @@ public:
 
     }
 };
+
