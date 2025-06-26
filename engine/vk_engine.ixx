@@ -2,6 +2,8 @@
 // Created by yuri on 15/6/2025.
 //
 module;
+#include <fstream>
+#include <iostream>
 #include <vulkan/vulkan.h>
 #include <VkBootstrap.h>
 #include <SDL3/SDL.h>
@@ -51,7 +53,8 @@ public:
         InitCommands();
         InitDefaultRenderpass();
         InitFramebuffers();
-        init_sync_structures();
+        InitSyncStructures();
+        InitPipeline();
 
         bIsEngineInit = true;
     }
@@ -230,7 +233,7 @@ public:
             (vkCreateFramebuffer(mDevice, &fbInfo, nullptr, &mFramebuffers[i]));
         }
     }
-    void init_sync_structures() {
+    void InitSyncStructures() {
         //create synchronization structures
         VkFenceCreateInfo fenceCreateInfo = {};
         fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -249,6 +252,67 @@ public:
 
         (vkCreateSemaphore(mDevice, &semaphoreCreateInfo, nullptr, &mPresentSemaphore));
         (vkCreateSemaphore(mDevice, &semaphoreCreateInfo, nullptr, &mRenderSemaphore));
+    }
+
+    bool LoadShaderModule(const char* filePath, VkShaderModule* outShaderModule) {
+        //open the file. With cursor at the end
+        // ate means "at the end"?
+        std::ifstream file(filePath, std::ios::ate | std::ios::binary);
+
+        if (!file.is_open()) {
+            return false;
+        }
+        //find what the size of the file is by looking up the location of the cursor
+        //because the cursor is at the end, it gives the size directly in bytes
+        size_t fileSize = file.tellg();
+        //spirv expects the buffer to be on uint32, so make sure to reserve an int vector big enough for the entire file
+        std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
+        //put file cursor at beginning
+        file.seekg(0);
+        //load the entire file into the buffer
+        file.read((char*)buffer.data(), fileSize);
+        //now that the file is loaded into the buffer, we can close it
+        file.close();
+
+        //create a new shader module, using the buffer we loaded
+        VkShaderModuleCreateInfo createInfo = {};
+        createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        createInfo.pNext = nullptr;
+        //codeSize has to be in bytes, so multiply the ints in the buffer by size of int to know the real size of the buffer
+        createInfo.codeSize = buffer.size() * sizeof(uint32_t);
+        createInfo.pCode = buffer.data();
+        //check that the creation goes well.
+        VkShaderModule shaderModule;
+        if (vkCreateShaderModule(mDevice, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+            return false;
+        }
+        *outShaderModule = shaderModule;
+        return true;
+
+    }
+
+    void InitPipeline() {
+        VkShaderModule triangleFragShader;
+        if (!LoadShaderModule("./Shaders/triangle.frag.spv", &triangleFragShader))
+        {
+            std::cout << "Error when building the triangle fragment shader module" << std::endl;
+        }
+        else {
+            std::cout << "Triangle fragment shader successfully loaded" << std::endl;
+        }
+
+        VkShaderModule triangleVertexShader;
+        if (!LoadShaderModule("./Shaders/triangle.vert.spv", &triangleVertexShader))
+        {
+            std::cout << "Error when building the triangle vertex shader module" << std::endl;
+
+        }
+        else {
+            std::cout << "Triangle vertex shader successfully loaded" << std::endl;
+        }
+
+
+
     }
 
     void Draw() {

@@ -19,10 +19,6 @@ public:
         }
         return 0;
     }
-    void Run() {
-
-
-    }
 
     void Cleanup() {
         SDL_DestroyWindow(mWindow);
